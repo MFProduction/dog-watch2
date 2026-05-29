@@ -6,15 +6,30 @@ A simple WebRTC-based dog monitoring system for local networks. Stream video and
 
 - Browser-based camera and microphone capture
 - Low-latency WebRTC peer-to-peer streaming
+- HTTPS with auto-generated self-signed certificates
 - Single binary deployment with embedded frontend
 - No authentication required (local network only)
 - Auto-discovery: just open `/watch` on your phone
 
+## Why HTTPS?
+
+Camera and microphone access requires a secure context (HTTPS) in modern browsers. The server automatically generates a self-signed certificate on first run. You'll need to accept the certificate warning in your browser.
+
 ## Usage
 
-1. Run the server on your homeserver
-2. Open `http://<server-ip>:8080/station` on the computer with camera/mic
-3. Open `http://<server-ip>:8080/watch` on your phone to view the stream
+1. Build and run the server on your homeserver:
+   ```bash
+   go build -o dog-watch
+   ./dog-watch
+   ```
+
+2. Open `https://<server-ip>:8443/station` on the computer with camera/mic
+   - Accept the self-signed certificate warning
+   - Click "Start Streaming" and grant camera/mic permissions
+
+3. Open `https://<server-ip>:8443/watch` on your phone to view the stream
+   - Accept the self-signed certificate warning
+   - Stream appears automatically
 
 ## Building
 
@@ -23,4 +38,17 @@ go build -o dog-watch
 ./dog-watch
 ```
 
-Server runs on port 8080 by default.
+Server runs on port 8443 by default. Use `-port` flag or `PORT` environment variable to change.
+
+## Command Line Options
+
+```
+-port int
+    Server port (default 8443)
+-certs string
+    Directory to store certificates (default ".")
+```
+
+## Network Setup
+
+The server automatically detects your local network IP addresses and includes them in the self-signed certificate. This allows access from any device on your local network.

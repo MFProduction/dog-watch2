@@ -1,0 +1,4 @@
+dog-watch
+*.exe
+.DS_Store
+*.pem
