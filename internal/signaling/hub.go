@@ -1,19 +1,20 @@
 package signaling
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"sync"
 
+	"dog-watch/internal/protocol"
 	"dog-watch/internal/room"
 
 	"github.com/gorilla/websocket"
 )
 
-type Message struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+type SessionRouter interface {
+	Register(role string, conn room.Connection) error
+	Remove(conn room.Connection)
+	GetPeer(role string) room.Connection
 }
 
 type Peer struct {
@@ -28,13 +29,13 @@ func (p *Peer) Send(msg []byte) error {
 }
 
 type Hub struct {
-	room     *room.Room
+	router   SessionRouter
 	upgrader websocket.Upgrader
 }
 
-func NewHub(r *room.Room) *Hub {
+func NewHub(router SessionRouter) *Hub {
 	return &Hub{
-		room: r,
+		router: router,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -53,36 +54,20 @@ func (h *Hub) HandleConnection(w http.ResponseWriter, r *http.Request) {
 	peer := &Peer{conn: conn}
 	role := r.URL.Query().Get("role")
 
-	var registerErr error
-	switch role {
-	case "station":
-		registerErr = h.room.RegisterStation(peer)
-		if registerErr == nil {
-			log.Println("Station connected")
-			h.notifyStationReady()
-		}
-	case "viewer":
-		registerErr = h.room.RegisterViewer(peer)
-		if registerErr == nil {
-			log.Println("Viewer connected")
-			h.notifyViewerReady()
-		}
-	default:
-		errMsg, _ := json.Marshal(Message{Type: "error", Data: json.RawMessage(`"invalid role"`)})
-		peer.Send(errMsg)
-		conn.Close()
-		return
-	}
-
-	if registerErr != nil {
-		errMsg, _ := json.Marshal(Message{Type: "error", Data: json.RawMessage(`"` + registerErr.Error() + `"`)})
-		peer.Send(errMsg)
+	registerErr := h.router.Register(role, peer)
+	if registerErr == nil {
+		log.Printf("%s connected", role)
+		h.notifyReady(role)
+	} else {
+		errMsg := protocol.NewError(registerErr.Error())
+		msgBytes, _ := errMsg.Marshal()
+		peer.Send(msgBytes)
 		conn.Close()
 		return
 	}
 
 	defer func() {
-		h.room.Remove(peer)
+		h.router.Remove(peer)
 		conn.Close()
 		log.Printf("%s disconnected", role)
 	}()
@@ -101,39 +86,59 @@ func (h *Hub) HandleConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) routeMessage(sender *Peer, role string, message []byte) {
-	var msg Message
-	if err := json.Unmarshal(message, &msg); err != nil {
+	_, err := protocol.Unmarshal(message)
+	if err != nil {
 		log.Printf("Invalid message format: %v", err)
 		return
 	}
 
-	var target room.Connection
+	var peerRole string
 	switch role {
 	case "station":
-		target = h.room.GetViewer()
+		peerRole = "viewer"
 	case "viewer":
-		target = h.room.GetStation()
+		peerRole = "station"
 	}
 
+	target := h.router.GetPeer(peerRole)
 	if target != nil {
 		if err := target.Send(message); err != nil {
-			log.Printf("Error sending message to %s: %v", role, err)
+			log.Printf("Error sending message to %s: %v", peerRole, err)
 		}
 	}
 }
 
-func (h *Hub) notifyStationReady() {
-	viewer := h.room.GetViewer()
-	if viewer != nil {
-		msg, _ := json.Marshal(Message{Type: "station-ready"})
-		viewer.Send(msg)
-	}
-}
+func (h *Hub) notifyReady(role string) {
+	var peerRole string
 
-func (h *Hub) notifyViewerReady() {
-	station := h.room.GetStation()
-	if station != nil {
-		msg, _ := json.Marshal(Message{Type: "viewer-ready"})
-		station.Send(msg)
+	switch role {
+	case "station":
+		peerRole = "viewer"
+	case "viewer":
+		peerRole = "station"
+	}
+
+	peer := h.router.GetPeer(peerRole)
+	if peer == nil {
+		return
+	}
+
+	switch role {
+	case "station":
+		stationMsg, _ := protocol.NewViewerReady().Marshal()
+		station := h.router.GetPeer("station")
+		if station != nil {
+			station.Send(stationMsg)
+		}
+		viewerMsg, _ := protocol.NewStationReady().Marshal()
+		peer.Send(viewerMsg)
+	case "viewer":
+		viewerMsg, _ := protocol.NewStationReady().Marshal()
+		viewer := h.router.GetPeer("viewer")
+		if viewer != nil {
+			viewer.Send(viewerMsg)
+		}
+		stationMsg, _ := protocol.NewViewerReady().Marshal()
+		peer.Send(stationMsg)
 	}
 }

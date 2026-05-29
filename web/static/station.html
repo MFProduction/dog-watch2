@@ -36,6 +36,7 @@
                 <div class="card-body">
                     <div class="mb-3">
                         <span id="statusBadge" class="badge bg-secondary status-badge">Disconnected</span>
+                        <span id="recordingBadge" class="badge bg-danger status-badge" style="display: none;">● REC</span>
                     </div>
 
                     <div class="mb-3">
@@ -45,6 +46,15 @@
                     <div class="d-grid gap-2">
                         <button id="startBtn" class="btn btn-primary btn-lg">Start Streaming</button>
                         <button id="stopBtn" class="btn btn-danger btn-lg" style="display: none;">Stop Streaming</button>
+                        <button id="muteBtn" class="btn btn-outline-warning btn-lg" style="display: none;">
+                            <span id="muteIcon">Mute Mic</span>
+                        </button>
+                        <button id="startRecordBtn" class="btn btn-outline-danger btn-lg" style="display: none;">
+                            <span id="recordIcon">Start Recording</span>
+                        </button>
+                        <button id="stopRecordBtn" class="btn btn-danger btn-lg" style="display: none;">
+                            <span id="stopRecordIcon">Stop Recording</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -56,14 +66,45 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="peer-connection.js"></script>
+    <script src="signaling-client.js"></script>
+    <script src="recorder.js"></script>
+    <script src="media-manager.js"></script>
     <script src="webrtc.js"></script>
     <script>
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
+        const muteBtn = document.getElementById('muteBtn');
+        const muteIcon = document.getElementById('muteIcon');
+        const startRecordBtn = document.getElementById('startRecordBtn');
+        const stopRecordBtn = document.getElementById('stopRecordBtn');
+        const recordingBadge = document.getElementById('recordingBadge');
         const localVideo = document.getElementById('localVideo');
         const statusBadge = document.getElementById('statusBadge');
 
         let client = null;
+        let isMuted = false;
+
+        window.addEventListener('beforeunload', (event) => {
+            if (client && client.media && client.media.isRecording()) {
+                try {
+                    // Send final chunk marker to trigger assembly
+                    const sessionId = client.media.recorder.getSessionId();
+                    if (sessionId) {
+                        const formData = new FormData();
+                        formData.append('sessionId', sessionId);
+                        formData.append('index', '999999');
+                        formData.append('final', 'true');
+                        formData.append('chunk', new Blob());
+
+                        // Use sendBeacon for reliable delivery during page unload
+                        navigator.sendBeacon('/api/recordings/chunk', formData);
+                    }
+                } catch (error) {
+                    console.error('Error sending final chunk marker:', error);
+                }
+            }
+        });
 
         function updateStatus(status) {
             statusBadge.className = 'badge status-badge';
@@ -112,6 +153,12 @@
 
                 startBtn.style.display = 'none';
                 stopBtn.style.display = 'block';
+                muteBtn.style.display = 'block';
+                startRecordBtn.style.display = 'block';
+                isMuted = false;
+                muteIcon.textContent = 'Mute Mic';
+                muteBtn.classList.remove('btn-warning');
+                muteBtn.classList.add('btn-outline-warning');
 
             } catch (error) {
                 console.error('Error accessing media devices:', error);
@@ -119,20 +166,74 @@
             }
         }
 
-        function stopStreaming() {
+        async function stopStreaming() {
             if (client) {
-                client.close();
+                if (client.media && client.media.isRecording()) {
+                    await stopRecording();
+                }
+                await client.close();
                 client = null;
             }
 
             localVideo.srcObject = null;
             startBtn.style.display = 'block';
             stopBtn.style.display = 'none';
+            muteBtn.style.display = 'none';
+            startRecordBtn.style.display = 'none';
+            stopRecordBtn.style.display = 'none';
+            recordingBadge.style.display = 'none';
             updateStatus('disconnected');
+        }
+
+        function toggleMute() {
+            if (!client) return;
+
+            client.media.muteLocalAudio(!isMuted);
+
+            isMuted = !isMuted;
+            if (isMuted) {
+                muteIcon.textContent = 'Unmute Mic';
+                muteBtn.classList.remove('btn-outline-warning');
+                muteBtn.classList.add('btn-warning');
+            } else {
+                muteIcon.textContent = 'Mute Mic';
+                muteBtn.classList.remove('btn-warning');
+                muteBtn.classList.add('btn-outline-warning');
+            }
+        }
+
+        function startRecording() {
+            if (!client || !client.media) return;
+
+            try {
+                client.media.startRecording();
+                startRecordBtn.style.display = 'none';
+                stopRecordBtn.style.display = 'block';
+                recordingBadge.style.display = 'inline-block';
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                alert('Failed to start recording: ' + error.message);
+            }
+        }
+
+        async function stopRecording() {
+            if (!client || !client.media) return;
+
+            try {
+                await client.media.stopRecording();
+                startRecordBtn.style.display = 'block';
+                stopRecordBtn.style.display = 'none';
+                recordingBadge.style.display = 'none';
+            } catch (error) {
+                console.error('Error stopping recording:', error);
+            }
         }
 
         startBtn.addEventListener('click', startStreaming);
         stopBtn.addEventListener('click', stopStreaming);
+        muteBtn.addEventListener('click', toggleMute);
+        startRecordBtn.addEventListener('click', startRecording);
+        stopRecordBtn.addEventListener('click', stopRecording);
     </script>
 </body>
 </html>

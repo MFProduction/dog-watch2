@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dog Watch - Recordings</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .recording-card {
+            transition: transform 0.2s;
+        }
+        .recording-card:hover {
+            transform: translateY(-2px);
+        }
+        .video-modal {
+            max-width: 900px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #6c757d;
+        }
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="mb-4">
+            <a href="/" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Back to Home
+            </a>
+        </div>
+
+        <div class="mb-4">
+            <h1 class="display-5">Recordings</h1>
+            <p class="lead">View and manage your recorded sessions</p>
+        </div>
+
+        <div id="loadingSpinner" class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+
+        <div id="emptyState" class="empty-state" style="display: none;">
+            <i class="bi bi-camera-video-off"></i>
+            <h3>No Recordings</h3>
+            <p>Start a recording from the station page to see it here.</p>
+        </div>
+
+        <div id="recordingsGrid" class="row g-4" style="display: none;"></div>
+    </div>
+
+    <div class="modal fade" id="videoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg video-modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="videoModalTitle">Recording</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <video id="videoPlayer" controls class="w-100"></video>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const recordingsGrid = document.getElementById('recordingsGrid');
+        const emptyState = document.getElementById('emptyState');
+        const loadingSpinner = document.getElementById('loadingSpinner');
+        const videoModal = new bootstrap.Modal(document.getElementById('videoModal'));
+        const videoPlayer = document.getElementById('videoPlayer');
+        const videoModalTitle = document.getElementById('videoModalTitle');
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        function formatDateTime(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString();
+        }
+
+        function createRecordingCard(recording) {
+            const col = document.createElement('div');
+            col.className = 'col-md-6 col-lg-4';
+            col.id = `recording-${recording.filename}`;
+
+            col.innerHTML = `
+                <div class="card recording-card shadow-sm h-100">
+                    <div class="card-body">
+                        <h6 class="card-title text-truncate" title="${recording.filename}">
+                            <i class="bi bi-file-earmark-play"></i> ${recording.filename}
+                        </h6>
+                        <p class="card-text">
+                            <small class="text-muted">
+                                <i class="bi bi-calendar"></i> ${formatDateTime(recording.createdAt)}<br>
+                                <i class="bi bi-hdd"></i> ${formatFileSize(recording.size)}
+                            </small>
+                        </p>
+                        <div class="btn-group w-100">
+                            <button class="btn btn-outline-primary btn-sm" onclick="playRecording('${recording.filename}')">
+                                <i class="bi bi-play-fill"></i> Play
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="deleteRecording('${recording.filename}')">
+                                <i class="bi bi-trash"></i> Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            return col;
+        }
+
+        async function loadRecordings() {
+            try {
+                const response = await fetch('/api/recordings');
+                const recordings = await response.json();
+
+                loadingSpinner.style.display = 'none';
+
+                if (recordings.length === 0) {
+                    emptyState.style.display = 'block';
+                    recordingsGrid.style.display = 'none';
+                } else {
+                    emptyState.style.display = 'none';
+                    recordingsGrid.style.display = 'flex';
+                    recordingsGrid.innerHTML = '';
+
+                    recordings.forEach(recording => {
+                        recordingsGrid.appendChild(createRecordingCard(recording));
+                    });
+                }
+            } catch (error) {
+                console.error('Error loading recordings:', error);
+                loadingSpinner.style.display = 'none';
+                emptyState.style.display = 'block';
+                emptyState.innerHTML = `
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <h3>Error Loading Recordings</h3>
+                    <p>Failed to load recordings. Please try again.</p>
+                `;
+            }
+        }
+
+        function playRecording(filename) {
+            videoModalTitle.textContent = filename;
+            videoPlayer.src = `/api/recordings/${filename}`;
+            videoModal.show();
+        }
+
+        async function deleteRecording(filename) {
+            if (!confirm(`Are you sure you want to delete ${filename}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/recordings/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    const card = document.getElementById(`recording-${filename}`);
+                    if (card) {
+                        card.remove();
+                    }
+
+                    if (recordingsGrid.children.length === 0) {
+                        recordingsGrid.style.display = 'none';
+                        emptyState.style.display = 'block';
+                    }
+                } else {
+                    alert('Failed to delete recording');
+                }
+            } catch (error) {
+                console.error('Error deleting recording:', error);
+                alert('Failed to delete recording');
+            }
+        }
+
+        document.getElementById('videoModal').addEventListener('hidden.bs.modal', () => {
+            videoPlayer.pause();
+            videoPlayer.src = '';
+        });
+
+        loadRecordings();
+    </script>
+</body>
+</html>

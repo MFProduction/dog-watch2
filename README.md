@@ -6,6 +6,7 @@ A simple WebRTC-based dog monitoring system for local networks. Stream video and
 
 - Browser-based camera and microphone capture
 - Low-latency WebRTC peer-to-peer streaming
+- **Video/audio recording** with browser-side capture and server storage
 - HTTPS with auto-generated self-signed certificates
 - Single binary deployment with embedded frontend
 - No authentication required (local network only)
@@ -31,6 +32,17 @@ Camera and microphone access requires a secure context (HTTPS) in modern browser
    - Accept the self-signed certificate warning
    - Stream appears automatically
 
+## Recording
+
+Record video and audio from the station for later playback:
+
+1. On the station page, click "Start Recording" to begin capturing
+2. A red "REC" badge indicates recording is in progress
+3. Click "Stop Recording" to stop and upload the recording to the server
+4. Open `https://<server-ip>:8443/recordings` to view, play, and delete recordings
+
+Recordings are stored as WebM files in the recordings directory (default: `./recordings/`). If you close the station page while recording, the recording is automatically stopped and uploaded (best-effort).
+
 ## Building
 
 ```bash
@@ -47,6 +59,8 @@ Server runs on port 8443 by default. Use `-port` flag or `PORT` environment vari
     Server port (default 8443)
 -certs string
     Directory to store certificates (default ".")
+-recordings string
+    Directory to store recordings (default "./recordings")
 ```
 
 ## Network Setup

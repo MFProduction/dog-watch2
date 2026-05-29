@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"dog-watch/internal/protocol"
 	"dog-watch/internal/room"
 
 	"github.com/gorilla/websocket"
@@ -73,7 +74,7 @@ func TestInvalidRole(t *testing.T) {
 		t.Fatalf("failed to read message: %v", err)
 	}
 
-	var message Message
+	var message protocol.Message
 	if err := json.Unmarshal(msg, &message); err != nil {
 		t.Fatalf("failed to unmarshal message: %v", err)
 	}
@@ -101,7 +102,7 @@ func TestRejectSecondStation(t *testing.T) {
 		t.Fatalf("failed to read message: %v", err)
 	}
 
-	var message Message
+	var message protocol.Message
 	if err := json.Unmarshal(msg, &message); err != nil {
 		t.Fatalf("failed to unmarshal message: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestRejectSecondViewer(t *testing.T) {
 		t.Fatalf("failed to read message: %v", err)
 	}
 
-	var message Message
+	var message protocol.Message
 	if err := json.Unmarshal(msg, &message); err != nil {
 		t.Fatalf("failed to unmarshal message: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestMessageRouting(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	testMsg := Message{
+	testMsg := protocol.Message{
 		Type: "offer",
 		Data: json.RawMessage(`{"sdp":"test"}`),
 	}
@@ -162,18 +163,20 @@ func TestMessageRouting(t *testing.T) {
 	}
 
 	viewer.SetReadDeadline(time.Now().Add(time.Second))
-	_, received, err := viewer.ReadMessage()
-	if err != nil {
-		t.Fatalf("failed to read message: %v", err)
-	}
+	for {
+		_, received, err := viewer.ReadMessage()
+		if err != nil {
+			t.Fatalf("failed to read message: %v", err)
+		}
 
-	var receivedMsg Message
-	if err := json.Unmarshal(received, &receivedMsg); err != nil {
-		t.Fatalf("failed to unmarshal message: %v", err)
-	}
+		var receivedMsg protocol.Message
+		if err := json.Unmarshal(received, &receivedMsg); err != nil {
+			t.Fatalf("failed to unmarshal message: %v", err)
+		}
 
-	if receivedMsg.Type != "offer" {
-		t.Errorf("expected offer message, got %s", receivedMsg.Type)
+		if receivedMsg.Type == "offer" {
+			break
+		}
 	}
 }
 
@@ -195,7 +198,7 @@ func TestViewerReadyNotification(t *testing.T) {
 		t.Fatalf("failed to read message: %v", err)
 	}
 
-	var message Message
+	var message protocol.Message
 	if err := json.Unmarshal(msg, &message); err != nil {
 		t.Fatalf("failed to unmarshal message: %v", err)
 	}
@@ -223,7 +226,7 @@ func TestStationReadyNotification(t *testing.T) {
 		t.Fatalf("failed to read message: %v", err)
 	}
 
-	var message Message
+	var message protocol.Message
 	if err := json.Unmarshal(msg, &message); err != nil {
 		t.Fatalf("failed to unmarshal message: %v", err)
 	}

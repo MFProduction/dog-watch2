@@ -8,6 +8,7 @@ import (
 var (
 	ErrStationAlreadyConnected = errors.New("station already connected")
 	ErrViewerAlreadyConnected  = errors.New("viewer already connected")
+	ErrInvalidRole             = errors.New("invalid role")
 )
 
 type Connection interface {
@@ -22,6 +23,28 @@ type Room struct {
 
 func New() *Room {
 	return &Room{}
+}
+
+func (r *Room) Register(role string, conn Connection) error {
+	switch role {
+	case "station":
+		return r.RegisterStation(conn)
+	case "viewer":
+		return r.RegisterViewer(conn)
+	default:
+		return ErrInvalidRole
+	}
+}
+
+func (r *Room) GetPeer(role string) Connection {
+	switch role {
+	case "station":
+		return r.GetStation()
+	case "viewer":
+		return r.GetViewer()
+	default:
+		return nil
+	}
 }
 
 func (r *Room) RegisterStation(conn Connection) error {

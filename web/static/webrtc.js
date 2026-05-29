@@ -1,133 +1,104 @@
 class WebRTCClient {
     constructor(role) {
         this.role = role;
-        this.pc = null;
-        this.ws = null;
-        this.localStream = null;
-        this.remoteStream = null;
+        this.peerConnection = new PeerConnectionManager();
+        this.signaling = new SignalingClient(role);
+        this.media = new MediaManager();
+        
         this.onRemoteStream = null;
         this.onStatusChange = null;
 
-        this.iceServers = [
-            { urls: 'stun:stun.l.google.com:19302' }
-        ];
+        this.setupPeerConnectionCallbacks();
+        this.setupSignalingCallbacks();
     }
 
-    createPeerConnection() {
-        this.pc = new RTCPeerConnection({ iceServers: this.iceServers });
-
-        this.pc.onicecandidate = (event) => {
-            if (event.candidate) {
-                this.sendMessage({
-                    type: 'ice-candidate',
-                    data: event.candidate
-                });
-            }
+    setupPeerConnectionCallbacks() {
+        this.peerConnection.onIceCandidate = (candidate) => {
+            this.signaling.send({
+                type: 'ice-candidate',
+                data: candidate
+            });
         };
 
-        this.pc.ontrack = (event) => {
-            this.remoteStream = event.streams[0];
+        this.peerConnection.onTrack = (stream) => {
+            this.media.setRemoteStream(stream);
             if (this.onRemoteStream) {
-                this.onRemoteStream(this.remoteStream);
+                this.onRemoteStream(stream);
             }
         };
 
-        this.pc.onconnectionstatechange = () => {
+        this.peerConnection.onConnectionStateChange = (state) => {
             if (this.onStatusChange) {
-                this.onStatusChange(this.pc.connectionState);
+                this.onStatusChange(state);
             }
         };
-
-        this.pc.oniceconnectionstatechange = () => {
-            console.log('ICE connection state:', this.pc.iceConnectionState);
-        };
     }
 
-    addLocalStream(stream) {
-        this.localStream = stream;
-        stream.getTracks().forEach(track => {
-            this.pc.addTrack(track, stream);
-        });
-    }
-
-    async createOffer() {
-        const offer = await this.pc.createOffer();
-        await this.pc.setLocalDescription(offer);
-        this.sendMessage({
-            type: 'offer',
-            data: offer
-        });
-    }
-
-    async handleOffer(offer) {
-        await this.pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await this.pc.createAnswer();
-        await this.pc.setLocalDescription(answer);
-        this.sendMessage({
-            type: 'answer',
-            data: answer
-        });
-    }
-
-    async handleAnswer(answer) {
-        await this.pc.setRemoteDescription(new RTCSessionDescription(answer));
-    }
-
-    async handleIceCandidate(candidate) {
-        await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
-    }
-
-    connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws?role=${this.role}`;
-
-        this.ws = new WebSocket(wsUrl);
-
-        this.ws.onopen = () => {
-            console.log('WebSocket connected');
+    setupSignalingCallbacks() {
+        this.signaling.onOpen = () => {
             if (this.onStatusChange) {
                 this.onStatusChange('signaling');
             }
         };
 
-        this.ws.onmessage = async (event) => {
-            const msg = JSON.parse(event.data);
+        this.signaling.onMessage = async (msg) => {
             await this.handleMessage(msg);
         };
 
-        this.ws.onclose = () => {
-            console.log('WebSocket closed');
+        this.signaling.onClose = () => {
             if (this.onStatusChange) {
                 this.onStatusChange('disconnected');
             }
         };
 
-        this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
+        this.signaling.onError = () => {
             if (this.onStatusChange) {
                 this.onStatusChange('error');
             }
         };
     }
 
+    createPeerConnection() {
+        this.peerConnection.create();
+    }
+
+    addLocalStream(stream) {
+        this.media.localStream = stream;
+        stream.getTracks().forEach(track => {
+            this.peerConnection.addTrack(track, stream);
+        });
+    }
+
+    connectWebSocket() {
+        this.signaling.connect();
+    }
+
     async handleMessage(msg) {
         switch (msg.type) {
             case 'offer':
-                await this.handleOffer(msg.data);
+                const answer = await this.peerConnection.createAnswer(msg.data);
+                this.signaling.send({
+                    type: 'answer',
+                    data: answer
+                });
                 break;
             case 'answer':
-                await this.handleAnswer(msg.data);
+                await this.peerConnection.setRemoteAnswer(msg.data);
                 break;
             case 'ice-candidate':
-                await this.handleIceCandidate(msg.data);
+                await this.peerConnection.addIceCandidate(msg.data);
                 break;
             case 'station-ready':
                 console.log('Station is ready');
                 break;
             case 'viewer-ready':
                 console.log('Viewer is ready');
-                if (this.role === 'station' && this.pc && this.pc.signalingState === 'stable') {
-                    await this.createOffer();
+                if (this.role === 'station' && this.peerConnection.isStable()) {
+                    const offer = await this.peerConnection.createOffer();
+                    this.signaling.send({
+                        type: 'offer',
+                        data: offer
+                    });
                 }
                 break;
             case 'error':
@@ -139,21 +110,9 @@ class WebRTCClient {
         }
     }
 
-    sendMessage(msg) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(msg));
-        }
-    }
-
     close() {
-        if (this.pc) {
-            this.pc.close();
-        }
-        if (this.ws) {
-            this.ws.close();
-        }
-        if (this.localStream) {
-            this.localStream.getTracks().forEach(track => track.stop());
-        }
+        this.peerConnection.close();
+        this.signaling.close();
+        this.media.close();
     }
 }
